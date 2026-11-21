@@ -36,7 +36,7 @@ jobs:
       - name: Test the installed release archive
         shell: bash
         run: |
-          archive="$(npm pack --quiet --pack-destination "$RUNNER_TEMP")"
+          archive="$(npm pack --ignore-scripts --quiet --pack-destination "$RUNNER_TEMP")"
           npm install --ignore-scripts --prefix "$RUNNER_TEMP/tplink-package" "$RUNNER_TEMP/$archive"
           export TPLINK_TEST_SERVER="$RUNNER_TEMP/tplink-package/node_modules/tplink-hb810-mcp/build/main.js"
           uv run --locked pytest -q
