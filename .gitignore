@@ -5,3 +5,5 @@ graphify-out/
 dist/
 .pytest_cache/
 assets/brand/*.svg
+node_modules/
+build/

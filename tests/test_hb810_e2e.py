@@ -1,6 +1,8 @@
 """Run the real stdio server end to end against an encrypted loopback HB810 simulator."""
 
 import json
+import subprocess
+from time import time
 from base64 import b64decode, b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -12,6 +14,7 @@ from Crypto.Util.number import getPrime
 from Crypto.Util.Padding import pad, unpad
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
+from mcp.types import ElicitResult
 
 from test_server import params
 
@@ -34,8 +37,18 @@ def hb810():
     objects = {
         "DEV2_DEV_INFO": {"modelName": "HB810", "X_TP_DevModelVersion": "1.0",
                           "X_TP_BuildDate": "251128", "X_TP_BuildTime": "64645"},
+        "DEV2_ADT_LAN": [{"MACAddress": "11:22:33:44:55:66", "IPAddress": "192.0.2.1",
+                          "IPv6Enable": "1", "IPv6Address": "2001:db8::1"}],
+        "DEV2_ADT_WAN": [{"enable": "1", "connIPv6Enabled": "1", "connIPv6Address": "2001:db8::2"}],
+        "DEV2_HOST_ENTRY": [{"active": "1", "X_TP_LanConnType": "0", "physAddress": "AA:BB:CC:DD:EE:FF",
+                             "IPAddress": "192.0.2.20", "hostName": "test-device", "leaseTimeRemaining": "60"}],
+        "DEV2_MEM_STATUS": {"total": "100", "free": "50"},
+        "DEV2_PROC_STATUS": {"CPUUsage": "10"},
+        "DEV2_ADT_WIFI_CLIENT": [{"MACAddress": "AA:BB:CC:DD:EE:FF", "signalStrength": "-58"}],
+        "DEV2_WIFI_APDEV_ASSOCDEV": [{"MACAddress": "AA:BB:CC:DD:EE:FF", "lastDataDownlinkRate": "320000"}],
         "DEV2_ADT_WIFI_COMMON": [{"stack": "3,0,0,0,0,0", "band": "6GHz", "primarySSID": "Home",
-                                  "primaryEnable": "1", "WPSEnable": "1", "WPSState": "Idle"}],
+                                  "primaryEnable": "1", "WPSEnable": "1", "WPSState": "Idle",
+                                  "primaryPSK": "simulator-wifi-key"}],
         "DEV2_DHCPV4_POOL_STATICADDR": [],
         "DEV2_DHCPV4_SERVER_POOL": [{"stack": "1,2,0,0,0,0", "X_TP_MainPool": "1"}],
         "DEV2_X_TP_ONBOARDBYSCANNING": {"status": "statusIdle"},
@@ -80,6 +93,9 @@ def hb810():
                 self.send('var ACT_OP_TR143_STARTDIAG = "ACT_TR143_STARTDIAG";')
             elif not self.authenticated():
                 self.send("missing token", 403)
+            elif path == "/cgi/log":
+                text = b"0\n2026-11-21 12:00:00 [5] DHCPD: lease renewed\n2026-11-21 12:01:00 [6] SYSTEM: started\n"
+                self.send(b64encode(crypt().encrypt(pad(text, 16))))
             elif path == "/cgi/HB810V125112864645n.bin":
                 query = parse_qs(urlsplit(self.path).query)
                 assert query == {"backupPassword": ["simulator-backup"], "enableBackupPassword": ["on"]}
@@ -171,7 +187,7 @@ def hb810():
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            yield f"http://127.0.0.1:{server.server_port}", events, uploads, reject_upload
+            yield f"http://127.0.0.1:{server.server_port}", events, uploads, reject_upload, objects
         finally:
             server.shutdown()
             thread.join()
@@ -188,25 +204,39 @@ async def call(session, name, **args):
 
 @pytest.mark.anyio
 async def test_hb810_workflows_over_mcp_stdio(tmp_path, hb810):
-    host, events, uploads, reject_upload = hb810
+    host, events, uploads, reject_upload, objects = hb810
     conn = params(tmp_path, TPLINK_HOST=host, TPLINK_PASSWORD="simulator-only", TPLINK_CLIENT="TPLinkEXClient",
                   TPLINK_WRITE="on", TPLINK_ALLOW="", TPLINK_DENY="")
-    async with stdio_client(conn) as (read, write), ClientSession(read, write) as session:
+    prompts = []
+
+    async def confirm_change(_context, request):
+        prompts.append(request.message)
+        return ElicitResult(action="accept", content={"approve": len(prompts) > 1})
+
+    async with (stdio_client(conn) as (read, write),
+                ClientSession(read, write, elicitation_callback=confirm_change) as session):
         await session.initialize()
         catalog = await call(session, "router_objects")
         assert "ACT_TR143_STARTDIAG" in catalog["operations"]
         assert events == []
         preview = await call(session, "set_wifi", band="6GHz", ssid="New home", password="not-shown-password")
         assert preview["status"] == "not applied" and "not-shown-password" not in str(preview)
-        assert events == []
+        assert events == [] and prompts == []
+        rejected = await call(session, "set_wifi", band="6GHz", password="not-shown-password", confirm=True)
+        assert rejected["reason"] == "the user did not approve it"
+        assert events == [] and "not-shown-password" not in prompts[0]
         await call(session, "set_wifi", band="6GHz", ssid="New home", confirm=True)
         assert events[-1][2:5] == ("3,0,0,0,0,0", "0,0,0,0,0,0", {"primarySSID": "New home"})
 
         args = {"mac": "AA:BB:CC:DD:EE:FF", "ip": "192.0.2.20"}
         await call(session, "set_static_ip", **args, confirm=True)
         assert events[-1][0] == "add" and events[-1][3] == "1,2,0,0,0,0"
+        preview = await call(session, "set_static_ip", **{**args, "ip": "192.0.2.21"})
+        assert "from 192.0.2.20 to 192.0.2.21" in preview["would_do"]
         await call(session, "set_static_ip", **{**args, "ip": "192.0.2.21"}, confirm=True)
+        assert "from 192.0.2.20 to 192.0.2.21" in prompts[-1]
         assert events[-1][0] == "so"
+        objects["DEV2_DHCPV4_POOL_STATICADDR"].insert(0, {"stack": "1,2,2,0,0,0"})
         await call(session, "remove_static_ip", mac=args["mac"], confirm=True)
         assert events[-1][0] == "del"
 
@@ -261,3 +291,55 @@ async def test_hb810_workflows_over_mcp_stdio(tmp_path, hb810):
 
         result = await session.call_tool("reboot_router", {"confirm": True})
         assert not result.is_error and events[-1][:2] == ("op", "ACT_REBOOT")
+
+
+@pytest.mark.anyio
+async def test_hb810_reads_and_one_shot_sample(tmp_path, hb810):
+    host, events, _, _, _ = hb810
+    conn = params(tmp_path, TPLINK_HOST=host, TPLINK_PASSWORD="simulator-only", TPLINK_CLIENT="TPLinkEXClient",
+                  TPLINK_WRITE="off", TPLINK_SHOW_SECRETS="0")
+    (tmp_path / "last.json").write_text("{}")
+    sample = subprocess.run([conn.command, *conn.args, "sample"], env=conn.env,
+                            check=True, capture_output=True, text=True, timeout=30)
+    assert json.loads(sample.stdout)["event"] == "join"
+    with (tmp_path / "presence.jsonl").open("a", encoding="ascii") as history:
+        history.write(sample.stdout)
+    async with stdio_client(conn) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        status = await call(session, "router_status")
+        assert status["client_class"] == "TPLinkEXClient" and status["online_devices"] == 1
+        clients = await call(session, "list_clients")
+        assert clients[0]["signal_dbm"] == -58 and clients[0]["rate_mbps"] == 320
+        assert (await call(session, "find_client", query="AA-BB-CC")) == clients
+        assert (await call(session, "client_history", mac="AA-BB-CC-DD-EE-FF"))[0]["name"] == "test-device"
+        history = await session.call_tool("client_history", {})
+        assert len(history.content) == 2
+        assert [json.loads(block.text) for block in history.content] == history.structured_content["result"]
+        assert (await call(session, "wifi_networks"))[0]["ssid"] == "Home"
+        assert (await call(session, "router_logs", module="dhcpd", contains="RENEWED"))[0]["severity"] == "notice"
+        assert len(await call(session, "dhcp_leases")) == 1
+        assert await call(session, "dhcp_reservations") == []
+        assert (await call(session, "ipv6_status"))["wan"][0]["address"] == "2001:db8::2"
+        rows = await call(session, "router_read", object="DEV2_ADT_WIFI_COMMON")
+        assert rows[0]["primaryPSK"] == "***"
+        assert events == []
+
+
+@pytest.mark.anyio
+async def test_reads_a_legacy_presence_file_before_migrating_it(tmp_path, hb810):
+    host, _, _, _, _ = hb810
+    conn = params(tmp_path, TPLINK_HOST=host, TPLINK_PASSWORD="simulator-only", TPLINK_CLIENT="TPLinkEXClient",
+                  TPLINK_LEGACY_STATE_ENCODING="cp1252")
+    mac = "11:22:33:44:55:66"
+    old = {"name": "téléphone", "ip": "192.0.2.30", "connection": "wired"}
+    (tmp_path / "last.json").write_bytes(json.dumps({mac: old}, ensure_ascii=False).encode("cp1252"))
+    payload = {"t": time(), "event": "join", "mac": mac, **old}
+    (tmp_path / "presence.jsonl").write_bytes((json.dumps(payload, ensure_ascii=False) + "\n").encode("cp1252"))
+    sample = subprocess.run([conn.command, *conn.args, "sample"], env=conn.env,
+                            check=True, capture_output=True, encoding="utf-8", timeout=30)
+    assert any(e["event"] == "leave" and e["name"] == "téléphone"
+               for e in map(json.loads, sample.stdout.splitlines()))
+    async with stdio_client(conn) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        events = await call(session, "client_history", mac=mac)
+        assert [(e["event"], e["name"]) for e in events] == [("join", "téléphone"), ("leave", "téléphone")]

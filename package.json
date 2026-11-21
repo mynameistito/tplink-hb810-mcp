@@ -1,0 +1,50 @@
+{
+  "name": "tplink-hb810-mcp",
+  "version": "0.3.0",
+  "description": "Local MCP server for TP-Link routers and ISP modems",
+  "license": "GPL-3.0-or-later",
+  "repository": "github:mynameistito/tplink-hb810-mcp",
+  "bin": {
+    "tplink-hb810-mcp": "build/main.js",
+    "tplink-modem-mcp": "build/main.js"
+  },
+  "files": [
+    "build/*.js",
+    "src/firmware_bridge.py",
+    "src/firmware_bridge.py.lock",
+    "src/tplink_modem_mcp/*.py",
+    "README.tr.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "ultracite check src test oxlint.config.ts oxfmt.config.ts tsconfig.json tsconfig.build.json package.json .github/workflows README.md README.tr.md CONTRIBUTING.md pyproject.toml",
+    "fix": "ultracite fix src test oxlint.config.ts oxfmt.config.ts tsconfig.json tsconfig.build.json package.json .github/workflows README.md README.tr.md CONTRIBUTING.md pyproject.toml",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:integration": "bun run build && uv run --locked pytest -q",
+    "prepack": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "effect": "4.1.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@interfere/landmines": "^0.1.1",
+    "@types/bun": "^1.4.5",
+    "@types/node": "^26.6.6",
+    "eslint-plugin-github": "6.1.2",
+    "eslint-plugin-jsdoc": "^65.4.12",
+    "eslint-plugin-sonarjs": "^4.2.2",
+    "eslint-plugin-tsdoc": "^0.5.4",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "oxlint-tsgolint": "^7.0.2007",
+    "typescript": "5.9.3",
+    "ultracite": "8.3.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

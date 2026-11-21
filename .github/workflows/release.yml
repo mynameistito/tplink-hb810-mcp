@@ -5,19 +5,21 @@ on:
     tags: ["v*"]
 
 jobs:
-  pypi:
+  package:
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
-      id-token: write  # trusted publishing, no API token stored
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
       - name: Tag matches the package version
-        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
-      - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+        run: test "${GITHUB_REF_NAME#v}" = "$(node -p 'require("./package.json").version')"
+      - run: bun run build
+      - run: npm pack
+      - run: gh release create "$GITHUB_REF_NAME" tplink-hb810-mcp-*.tgz --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

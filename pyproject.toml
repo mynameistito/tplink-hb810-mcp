@@ -1,45 +1,16 @@
 [project]
-name = "tplink-hb810-mcp"
+name = "tplink-hb810-mcp-tests"
 version = "0.2.0"
-description = "Local MCP server for the TP-Link Aginet HB810 Wi-Fi 7 router"
-readme = "README.md"
-license = "GPL-3.0-or-later"
-keywords = ["mcp", "mcp-server", "tp-link", "aginet", "hb810", "router", "wifi", "home-network"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Environment :: Console",
-    "Intended Audience :: End Users/Desktop",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Topic :: System :: Networking :: Monitoring",
-]
-authors = [
-    { name = "Yakup Emre Yerli" }
-]
 requires-python = ">=3.12"
-dependencies = [
-    "mcp[cli]>=2.3.0",
-    "tplinkrouterc6u>=5.40.0",
-]
-
-[project.urls]
-Homepage = "https://github.com/mynameistito/tplink-hb810-mcp"
-Issues = "https://github.com/mynameistito/tplink-hb810-mcp/issues"
-Upstream = "https://github.com/YakupEmreYerli/tplink-modem-mcp"
-
-[project.scripts]
-tplink-hb810-mcp = "tplink_modem_mcp.server:main"
-tplink-modem-mcp = "tplink_modem_mcp.server:main"
-
-[build-system]
-requires = ["uv_build>=0.13.8,<0.14.0"]
-build-backend = "uv_build"
-
-[tool.uv.build-backend]
-module-name = "tplink_modem_mcp"
+dependencies = []
 
 [dependency-groups]
 dev = [
-    "anyio>=4.16.0",
-    "pytest>=9.2.0",
+  "anyio>=4.16.0",
+  "mcp>=2.3.0",
+  "pytest>=9.2.0",
+  "tplinkrouterc6u==5.40.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

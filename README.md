@@ -10,20 +10,25 @@ This is a fork of [tplink-modem-mcp](https://github.com/YakupEmreYerli/tplink-mo
 
 ## Quick start
 
-Install [uv](https://docs.astral.sh/uv/) and run the server on a machine that can reach the router's local admin interface. Use the web admin password for the HB810.
+Install Node.js 22.19 or newer and [uv](https://docs.astral.sh/uv/). Run the server on a machine that can reach the router's local admin interface. The TypeScript server uses Effect for tool execution and presence tracking. A bundled Python adapter still runs the existing firmware drivers. On the first router call, uv prepares the adapter's locked dependencies.
 
-For an MCP client that accepts JSON configuration, run the fork directly from GitHub:
+Install [Bun](https://bun.sh/) to build from a checkout:
+
+```sh
+git clone https://github.com/mynameistito/tplink-hb810-mcp
+cd tplink-hb810-mcp
+bun install --frozen-lockfile
+bun run build
+```
+
+In your MCP client, use the absolute path to the built server:
 
 ```json
 {
   "mcpServers": {
     "tplink-hb810": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/mynameistito/tplink-hb810-mcp.git",
-        "tplink-hb810-mcp"
-      ],
+      "command": "node",
+      "args": ["/absolute/path/to/tplink-hb810-mcp/build/main.js"],
       "env": {
         "TPLINK_HOST": "http://192.168.1.1",
         "TPLINK_USERNAME": "admin",
@@ -38,7 +43,7 @@ For an MCP client that accepts JSON configuration, run the fork directly from Gi
 
 Set `TPLINK_HOST` to your router's actual address. After connecting, call `router_status`, then try `list_clients` or `wifi_networks`.
 
-To run from a checkout, clone this fork and use `uv --directory /path/to/tplink-hb810-mcp run --locked tplink-hb810-mcp` as the server command. Pass the same environment variables through your MCP client.
+For a packaged install, download the `.tgz` from a [GitHub release](https://github.com/mynameistito/tplink-hb810-mcp/releases) and run `npm install -g ./tplink-hb810-mcp-VERSION.tgz`. Set the MCP command to `tplink-hb810-mcp`, clear its arguments, and keep the same environment variables.
 
 ## What the MCP can do
 
@@ -70,15 +75,19 @@ The guided Quick Setup wizard, TP-Link Cloud sign-in, and online or satellite fi
 | `TPLINK_TIMEOUT` | `20` | Router request timeout in seconds |
 | `TPLINK_PRESENCE_INTERVAL` | `60` | Seconds between presence samples. Set to `0` to disable background sampling. |
 | `TPLINK_STATE_DIR` | `$XDG_STATE_HOME/tplink-modem-mcp` | Presence history directory, retaining the upstream name for existing installs |
+| `TPLINK_LEGACY_STATE_ENCODING` | Python locale encoding | Set to the original encoding if migrating non-UTF-8 history from a different locale |
 | `TPLINK_LOG` | `WARNING` | Server log level |
 
-Client presence history records joins, leaves, and IP changes while the sampler runs. Use `uv run --locked tplink-hb810-mcp sample` for a one-shot sample from a scheduler. The router's admin session can be shared between the MCP and the web panel only as the firmware permits.
+Client presence history records joins, leaves, and IP changes while the sampler runs. Use `node build/main.js sample` or `tplink-hb810-mcp sample` after a global install for a one-shot sample from a scheduler. The router's admin session can be shared between the MCP and the web panel only as the firmware permits.
 
 ## Tests
 
 ```sh
-uv run --locked pytest -q
-uv build
+bun run check
+bun run typecheck
+bun test
+bun run test:integration
+npm pack --dry-run
 ```
 
 The [end-to-end test](tests/test_hb810_e2e.py) starts the MCP server over stdio and runs authenticated requests against an encrypted loopback router. It needs no physical router or credentials.

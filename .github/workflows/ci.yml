@@ -10,19 +10,36 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python: ["3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --locked
-      - run: uv run pytest -q
-      - run: uv build
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      - name: Test the installed release archive
+        shell: bash
+        run: |
+          archive="$(npm pack --ignore-scripts --quiet --pack-destination "$RUNNER_TEMP")"
+          npm install --ignore-scripts --prefix "$RUNNER_TEMP/tplink-package" "$RUNNER_TEMP/$archive"
+          export TPLINK_TEST_SERVER="$RUNNER_TEMP/tplink-package/node_modules/tplink-hb810-mcp/build/main.js"
+          uv run --locked pytest -q
 
   # Security updates from Dependabot merge themselves once the tests pass.
   dependabot-merge:
